@@ -133,7 +133,7 @@ const qos = 2;
                     json_attributes_topic: attributesTopic,
                     qos,
                     name: `${name} Recycling`,
-                    icon: "mdi:trash-can-outline",
+                    icon: "mdi:recycle",
                     device_class: "timestamp",
                 }),
                 options
