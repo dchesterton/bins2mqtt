@@ -22,5 +22,6 @@ COPY --from=builder /app/dist /app/dist
 COPY --from=builder /app/package.json /app/package.json
 
 LABEL author="Daniel Chesterton"
+LABEL app="bins2mqtt"
 
 CMD [ "node", "/app/dist/index.js" ]
