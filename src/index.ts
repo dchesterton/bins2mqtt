@@ -16,10 +16,10 @@ enum TamesideBinType {
 }
 
 const BinTypes = {
-    [TamesideBinType.Brown]: "brown",
-    [TamesideBinType.Black]: "black",
-    [TamesideBinType.Blue]: "blue",
-    [TamesideBinType.Green]: "green",
+    [TamesideBinType.Brown]: "garden" as "garden",
+    [TamesideBinType.Black]: "bottles" as "bottles",
+    [TamesideBinType.Blue]: "cardboard" as "cardboard",
+    [TamesideBinType.Green]: "general" as "general",
 };
 
 type TamesideResponse = {
@@ -37,6 +37,10 @@ const stringToDate = (str: string) => {
     const year = Number(str.substring(6, 10));
 
     return new Date(year, month, day, 10, 0, 0);
+};
+
+const capitalize = (s: string) => {
+    return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
 const fetchBins = async () => {
@@ -58,34 +62,31 @@ const fetchBins = async () => {
         },
     } as AxiosRequestConfig);
 
-    const bins: Array<string> = [];
-    let collectionDate: Date | null = null;
+    const next: {
+        cardboard?: Date;
+        garden?: Date;
+        bottles?: Date;
+        general?: Date;
+    } = {};
 
     for (const bin of response.data.GetBinCollectionResult.Data) {
         const date = stringToDate(bin.CollectionDate);
 
         if (date >= new Date()) {
-            if (collectionDate) {
-                if (collectionDate.getTime() !== date.getTime()) {
-                    break;
-                }
+            if (!next.hasOwnProperty(BinTypes[bin.BinType])) {
+                next[BinTypes[bin.BinType]] = date;
             }
 
-            collectionDate = date;
-            bins.push(BinTypes[bin.BinType]);
+            if (Object.keys(next).length === 4) {
+                break;
+            }
         }
     }
 
-    return {
-        bins,
-        collectionDate: collectionDate as Date,
-    };
+    return next;
 };
 
-const binTopic = "bins2mqtt/next";
 const attributesTopic = "bins2mqtt/attributes";
-const homeAssistantTopic =
-    "homeassistant/sensor/bins2mqtt/next_bin_collection/config";
 const qos = 2;
 
 (async () => {
@@ -93,12 +94,7 @@ const qos = 2;
     const mqttUsername = process.env.MQTT_USERNAME!;
     const mqttPassword = process.env.MQTT_PASSWORD!;
 
-    const { bins, collectionDate } = await fetchBins();
-
-    console.log(
-        `Next: ${collectionDate.toISOString()}, ${JSON.stringify(bins)}`
-    );
-
+    const bins = await fetchBins();
     const client = await connectAsync({
         hostname: mqttHost,
         username: mqttUsername,
@@ -113,28 +109,48 @@ const qos = 2;
         retain: true,
     } as IClientPublishOptions;
 
-    await Promise.all([
-        client.publish(binTopic, JSON.stringify(bins), options),
+    const promises = [];
+
+    for (const key of ["general", "cardboard", "bottles", "garden"] as [
+        "general",
+        "cardboard",
+        "bottles",
+        "garden"
+    ]) {
+        const name = capitalize(key);
+        const binTopic = `bins2mqtt/${key}`;
+        const homeAssistantTopic = `homeassistant/sensor/bins2mqtt/${key}_recycling/config`;
+        const date = bins[key]!.toISOString().substr(0, 10);
+
+        console.log(`${name} next collected on ${date}`);
+
+        promises.push(
+            client.publish(binTopic, date, options),
+            client.publish(
+                homeAssistantTopic,
+                JSON.stringify({
+                    state_topic: binTopic,
+                    json_attributes_topic: attributesTopic,
+                    qos,
+                    name: `${name} Recycling`,
+                    icon: "mdi:trash-can-outline",
+                    device_class: "timestamp",
+                }),
+                options
+            )
+        );
+    }
+
+    promises.push(
         client.publish(
             attributesTopic,
             JSON.stringify({
-                collection_date: collectionDate.toISOString().substring(0, 10),
                 last_updated: new Date().toISOString(),
             }),
             options
-        ),
-        client.publish(
-            homeAssistantTopic,
-            JSON.stringify({
-                state_topic: binTopic,
-                json_attributes_topic: attributesTopic,
-                qos,
-                name: "Next Bin Collection",
-                icon: "mdi:trash-can-outline",
-            }),
-            options
-        ),
-    ]);
+        )
+    );
 
+    await Promise.all(promises);
     await client.end();
 })();
