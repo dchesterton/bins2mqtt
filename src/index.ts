@@ -36,7 +36,7 @@ const stringToDate = (str: string) => {
     const month = Number(str.substring(3, 5)) - 1;
     const year = Number(str.substring(6, 10));
 
-    return new Date(year, month, day, 10, 0, 0);
+    return new Date(year, month, day, 7, 0, 0);
 };
 
 const capitalize = (s: string) => {
@@ -120,7 +120,7 @@ const qos = 2;
         const name = capitalize(key);
         const binTopic = `bins2mqtt/${key}`;
         const homeAssistantTopic = `homeassistant/sensor/bins2mqtt/${key}_recycling/config`;
-        const date = bins[key]!.toISOString().substr(0, 10);
+        const date = bins[key]!.toISOString();
 
         console.log(`${name} next collected on ${date}`);
 
