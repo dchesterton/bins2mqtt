@@ -111,12 +111,7 @@ const qos = 2;
 
     const promises = [];
 
-    for (const key of ["general", "cardboard", "bottles", "garden"] as [
-        "general",
-        "cardboard",
-        "bottles",
-        "garden"
-    ]) {
+    for (const key of ["general", "cardboard", "bottles", "garden"] as const) {
         const name = capitalize(key);
         const binTopic = `bins2mqtt/${key}`;
         const homeAssistantTopic = `homeassistant/sensor/bins2mqtt/${key}_recycling/config`;
@@ -135,6 +130,7 @@ const qos = 2;
                     name: `${name} Recycling`,
                     icon: "mdi:recycle",
                     device_class: "timestamp",
+                    unique_id: `bins2mqtt-${key}`,
                 }),
                 options
             )
