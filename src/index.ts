@@ -1,100 +1,56 @@
-import axios, { AxiosRequestConfig } from "axios";
-import {
-    connectAsync,
-    IClientOptions,
-    IClientPublishOptions,
-} from "async-mqtt";
+import axios from "axios";
+import { connectAsync, IClientPublishOptions } from "async-mqtt";
+import { TamesideResponse, attributesTopic, qos, url, binTypes } from "./types";
+import { capitalize, stringToDate } from "./util";
 
-const url =
-    "http://lite.tameside.gov.uk/BinCollections/CollectionService.svc/GetBinCollection";
-
-enum TamesideBinType {
-    Brown = "3",
-    Black = "5",
-    Blue = "2",
-    Green = "6",
-}
-
-const BinTypes = {
-    [TamesideBinType.Brown]: "garden" as "garden",
-    [TamesideBinType.Black]: "bottles" as "bottles",
-    [TamesideBinType.Blue]: "cardboard" as "cardboard",
-    [TamesideBinType.Green]: "general" as "general",
-};
-
-type TamesideResponse = {
-    GetBinCollectionResult: {
-        Data: Array<{
-            BinType: TamesideBinType;
-            CollectionDate: string;
-        }>;
-    };
-};
-
-const stringToDate = (str: string) => {
-    const day = Number(str.substring(0, 2));
-    const month = Number(str.substring(3, 5)) - 1;
-    const year = Number(str.substring(6, 10));
-
-    return new Date(year, month, day, 7, 0, 0);
-};
-
-const capitalize = (s: string) => {
-    return s.charAt(0).toUpperCase() + s.slice(1);
-};
-
-const fetchBins = async () => {
-    const data = JSON.stringify({
-        operatingsystemid: "1",
-        version: "3.0.19",
-        testmode: "0",
-        notification: "1",
-        token: "",
-        uprn: "100011553742",
-    });
-
-    const response = await axios.post<TamesideResponse>(url, data, {
-        headers: {
-            "User-Agent":
-                "Tameside Council/3.0.19 (iPhone; iOS 14.4; Scale/3.00)",
-            "Accept-Language": "en-GB;q=1",
-            "Content-Type": "text/plain",
+const fetchBins = async (uprn: string) => {
+    const response = await axios.post<TamesideResponse>(
+        url,
+        {
+            operatingsystemid: "1",
+            version: "3.0.19",
+            testmode: "0",
+            notification: "1",
+            token: "",
+            uprn,
         },
-    } as AxiosRequestConfig);
+        {
+            headers: {
+                "User-Agent":
+                    "Tameside Council/3.0.19 (iPhone; iOS 14.4; Scale/3.00)",
+                "Accept-Language": "en-GB;q=1",
+                "Content-Type": "text/plain",
+            },
+        }
+    );
 
-    const next: {
-        cardboard?: Date;
-        garden?: Date;
-        bottles?: Date;
-        general?: Date;
-    } = {};
+    type Next = Record<typeof binTypes[keyof typeof binTypes], Date>;
+    const next: Partial<Next> = {};
 
     for (const bin of response.data.GetBinCollectionResult.Data) {
         const date = stringToDate(bin.CollectionDate);
 
         if (date >= new Date()) {
-            if (!next.hasOwnProperty(BinTypes[bin.BinType])) {
-                next[BinTypes[bin.BinType]] = date;
+            if (!next.hasOwnProperty(binTypes[bin.BinType])) {
+                next[binTypes[bin.BinType]] = date;
             }
 
-            if (Object.keys(next).length === 4) {
+            if (Object.keys(next).length === Object.keys(binTypes).length) {
                 break;
             }
         }
     }
 
-    return next;
+    return next as Next;
 };
-
-const attributesTopic = "bins2mqtt/attributes";
-const qos = 2;
 
 (async () => {
     const mqttHost = process.env.MQTT_HOST!;
     const mqttUsername = process.env.MQTT_USERNAME!;
     const mqttPassword = process.env.MQTT_PASSWORD!;
+    const uprn = process.env.UPRN!;
 
-    const bins = await fetchBins();
+    const bins = await fetchBins(uprn);
     const client = await connectAsync({
         hostname: mqttHost,
         username: mqttUsername,
@@ -102,29 +58,29 @@ const qos = 2;
         clientId: "bins2mqtt",
         protocol: "mqtt",
         port: 1883,
-    } as IClientOptions);
+    });
 
-    const options = {
+    const options: IClientPublishOptions = {
         qos,
         retain: true,
-    } as IClientPublishOptions;
+    };
 
     const promises = [];
 
-    for (const key of ["general", "cardboard", "bottles", "garden"] as const) {
+    for (const key of Object.values(binTypes)) {
         const name = capitalize(key);
-        const binTopic = `bins2mqtt/${key}`;
+        const topic = `bins2mqtt/${key}`;
         const homeAssistantTopic = `homeassistant/sensor/bins2mqtt/${key}_recycling/config`;
-        const date = bins[key]!.toISOString();
+        const date = bins[key].toISOString();
 
         console.log(`${name} next collected on ${date}`);
 
         promises.push(
-            client.publish(binTopic, date, options),
+            client.publish(topic, date, options),
             client.publish(
                 homeAssistantTopic,
                 JSON.stringify({
-                    state_topic: binTopic,
+                    state_topic: topic,
                     json_attributes_topic: attributesTopic,
                     qos,
                     name: `${name} Recycling`,
