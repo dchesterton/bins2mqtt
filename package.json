@@ -7,7 +7,7 @@
     "author": "Daniel Chesterton",
     "license": "MIT",
     "dependencies": {
-        "async-mqtt": "^2.6.1",
+        "async-mqtt": "^2.6.3",
         "axios": "^0.24.0"
     },
     "devDependencies": {
